@@ -21,3 +21,4 @@ nbdist/
 nbproject/private/
 .npm-debug.log
 tmp
+index.copy.js
