@@ -1,42 +1,70 @@
 
 
-const pooledDownload = (connect, save, downloadList, maxConcurrency) => {
-  //console.log({downloadList: downloadList.length, maxConcurrency})
-  let pendingDownload = [...downloadList]
-  const connectPool = []
-  const closeConnectionList = [];
-    for(let i = 0; i  < downloadList.length && i < maxConcurrency; i++) {
-      //console.log({ 'startI': i })
-      const connectPoolItem = connect()
-        .catch((e) => {  
+async function sc(connect, t) {
+  return await connect
+}
+let numberConnection = 0
+class Connection {
+ 
+  constructor(connection, save, downloadInfo) {
+    this.connectNumber = numberConnection
+    numberConnection++
+    this.connection = connection;
+    this.save = save;
+    this.downloadInfo = downloadInfo;
+  }
+
+  async start() {
+    const { connection, save, downloadInfo, connectNumber } = this;
+    const { download, close } = connection
+    //console.log('start', { connectNumber})
+    while(downloadInfo.pending.length > 0) {
+      const url = downloadInfo.pending.pop()
+      //console.log({url})
+      await download(url)
+        .then((result) => save(result))
+        .catch((e) => {
           //console.log(e)
-          throw new Error('connection failed') 
+          close() 
+          throw e
         })
-        .then(async (connection) => {
-          //console.log('startPool '+i)
-          const { download, close } = connection
-          closeConnectionList.push(close)
-          while(pendingDownload.length > 0) {
-            //console.log({ 'pool': i, 'pendingDownload': pendingDownload.length})
-            await download(pendingDownload.pop())
-              .then((result) => save(result))
-              .catch((e) => { 
-                throw e
-              })
-            //console.log( 'pool '+ i + ' end')
-          }
-          close()
-      })
-      connectPool.push(connectPoolItem);
-      //console.log({ 'connectPoolLength': connectPool.length })
-    }    
-  //console.log({connectPool: connectPool.length})
-  return Promise.all(connectPool)
-    .catch((e) => {
-      try {
-        closeConnectionList.forEach(c => c())
-      } catch {}
-      throw e
+    }
+    close()
+    //console.log('end', { connectNumber})
+  }
+
+}
+
+const pooledDownload = async (connect, save, downloadList, maxConcurrency) => {
+  //console.log({downloadList: downloadList.length, maxConcurrency})
+  let downloadInfo = { pending: [...downloadList], connectionsOpens: 0 }
+  
+  const createdConnection = async (c, i) => {
+    //console.log("createdConnection "+i)
+    downloadInfo.connectionsOpens = i
+    const connectedPool = [new Connection(c, save, downloadInfo)]
+    try {
+      if (i < maxConcurrency) {
+        const c = await connect()
+        connectedPool.push(...await createdConnection(c, i+1))
+      } 
+    } catch(e) {
+      //console.log({e})
+      //connectedPool.push(Promise.reject(new Error('connection failed')))
+    }
+    return connectedPool
+  }
+
+  return connect()
+    .catch(e => { throw new Error('connection failed' ) })
+    .then(async c => {
+      connections = await createdConnection(c, 1)
+      return Promise.allSettled(connections.map(c => c.start()))
+        .then((values) => {
+          //console.log(values)
+          const error = values.find((v) => v.status === 'rejected')
+          if(error) throw error.reason
+        })
     })
 }
 
